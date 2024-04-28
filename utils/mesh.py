@@ -2,11 +2,15 @@ import numpy as np
 import torch
 import kaolin
 
+from utils.icosphere import icosphere
+
 
 class Mesh:
-    def __init__(self, obj_path, device):
+    def __init__(self, vertices, faces, mesh_name="Mesh", device="cuda:0"):
         """
-        :param obj_path: path to the obj file of the mesh
+        :param vertices: numpy array or torch tensor with shape [num_vertices, 3]
+        :param faces: numpy array or torch tensor with shape [num_faces, 3]
+        :param mesh_name: name of the mesh
         :param device: pytorch device to store the mesh data
 
         The mesh class has the following attributes:
@@ -19,29 +23,31 @@ class Mesh:
         - laplacian_matrix: torch sparse tensor with shape [num_vertices, num_vertices]
         - Nv, Nf, Ne: number of vertices, faces, and edges in the mesh
         """
-        # We use kaolin to load the mesh.
-        # Other libraries like trimesh create duplicate vertices if a vertex has several normals.
-        mesh = kaolin.io.obj.import_mesh(obj_path, with_normals=True)
-        self.mesh_name = obj_path.split('/')[-2]
+        self.mesh_name = mesh_name
 
-        vertices, faces = np.array(mesh.vertices), np.array(mesh.faces)
+        if isinstance(vertices, np.ndarray):
+            self.vertices = torch.tensor(vertices, dtype=torch.float32, device=device)
+        else:
+            self.vertices = vertices.to(device)
 
-        # Extract edges from faces of the mesh
-        edges = np.column_stack([faces, np.roll(faces, shift=-1, axis=1)])
-        edges = edges.reshape(-1, 2)
-        edges = np.sort(edges, axis=1)
-        edges = np.unique(edges, axis=0)
-
-        bi_edges = np.concatenate([edges, edges[:, [1, 0]]], axis=0)
-        # bi_edges = np.sort(bi_edges, axis=1)
-        sorted_ids = np.argsort(bi_edges, axis=0)[:, 0]
-        bi_edges = bi_edges[sorted_ids]
+        if isinstance(faces, np.ndarray):
+            self.faces = torch.tensor(faces, dtype=torch.int64, device=device)
+        else:
+            self.faces = faces.to(device)
 
         with torch.no_grad():
-            self.vertices = torch.tensor(vertices, dtype=torch.float32, device=device)
-            self.faces = torch.tensor(faces, dtype=torch.int64, device=device)
-            self.edges = torch.tensor(edges, dtype=torch.int64, device=device)
-            self.edge_index = torch.tensor(bi_edges.T, dtype=torch.int64, device=device)
+            # Extract edges from faces of the mesh
+            edges = torch.column_stack([self.faces, torch.roll(self.faces, shifts=-1, dims=1)])
+            edges = edges.reshape(-1, 2)
+            edges, _ = torch.sort(edges, dim=1)
+            edges = torch.unique(edges, dim=0)
+            edges_idx = torch.argsort(edges, dim=0)[:, 0]
+            self.edges = edges[edges_idx]
+
+            bi_edges = torch.cat([edges, edges[:, [1, 0]]], dim=0)
+            # bi_edges = np.sort(bi_edges, axis=1)
+            sorted_ids = torch.argsort(bi_edges, dim=0, descending=False)[:, 0]
+            self.edge_index = bi_edges[sorted_ids].T
 
         # Normalize the mesh so that it fits into a unit sphere
         self.normalize_into_unit_sphere()
@@ -53,6 +59,38 @@ class Mesh:
         self._compute_laplacian()
 
         self.Nv, self.Nf, self.Ne = self.vertices.shape[0], self.faces.shape[0], self.edges.shape[0]
+
+    @staticmethod
+    def load_from_obj(obj_path, subdivision_iter=0, **kwargs):
+        """Load a mesh from an obj file."""
+        # We use kaolin to load the mesh.
+        # Other libraries like trimesh create duplicate vertices if a vertex has several normals.
+        mesh = kaolin.io.obj.import_mesh(obj_path, with_normals=True)
+        mesh_name = obj_path.split('/')[-1]
+
+        vertices, faces = mesh.vertices, mesh.faces
+
+        if subdivision_iter > 0:
+            vertices, faces = kaolin.ops.mesh.subdivide_trianglemesh(vertices.unsqueeze(0),
+                                                                     faces,
+                                                                     subdivision_iter)
+            vertices, faces = vertices.squeeze(0), faces
+
+        return Mesh(vertices, faces, mesh_name=mesh_name, **kwargs)
+
+    @staticmethod
+    def load_icosphere(subdivision_freq=2 ** 6, **kwargs):
+        """
+        Load an icosphere mesh with a given number of subdivisions.
+
+        :param subdivision_freq: Subdivision frequency
+
+        :return: Mesh object of the icosphere
+        the mesh will have 12 + 10 * (subdivision_freq**2 -1) vertices and 20 * (subdivision_freq**2) faces
+        Setting subdivision_freq=2**n will create an icosphere sphere with n recursive subdivisions.
+        """
+        vertices, faces = icosphere(nu=subdivision_freq)
+        return Mesh(vertices, faces, mesh_name=f"Icosphere", **kwargs)
 
     @torch.no_grad()
     def normalize_into_unit_sphere(self):
@@ -140,5 +178,10 @@ class Mesh:
 
 
 if __name__ == '__main__':
-    mesh = Mesh('../data/meshes/cat/cat_remesh_lvl1.obj', device='cuda:0')
-    print(mesh)
+    mesh1 = Mesh.load_from_obj('../data/meshes/cat/cat.obj', subdivision_iter=1, device='cuda:0')
+    mesh2 = Mesh.load_icosphere(2 ** 6, device='cuda:0')
+
+    print(mesh1)
+
+    print(mesh2)
+

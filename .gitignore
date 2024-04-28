@@ -9,6 +9,7 @@ install_requirements.sh
 
 # Outputs and Data
 output/
+results/
 *.mp4
 data/
 configs/

@@ -97,7 +97,7 @@ if __name__ == '__main__':
 
     device = torch.device("cuda:0")
 
-    mesh = Mesh('../data/meshes/mug/mug_remesh_lvl1.obj', device=device)
+    mesh = Mesh.load_from_obj('../data/meshes/mug/mug.obj', device=device)
     # mesh = Mesh('../data/meshes/flatland/flatland_remesh_lvl1.obj', device=device)
     # mesh = Mesh('../data/meshes/sphere/sphere_remesh_lvl1.obj', device=device)
 

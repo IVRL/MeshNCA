@@ -3,24 +3,6 @@ from functools import partial
 
 import torch
 
-import progressbar
-
-pbar = None
-
-
-def show_progress(block_num, block_size, total_size):
-    global pbar
-    if pbar is None:
-        pbar = progressbar.ProgressBar(maxval=total_size)
-        pbar.start()
-
-    downloaded = block_num * block_size
-    if downloaded < total_size:
-        pbar.update(downloaded)
-    else:
-        pbar.finish()
-        pbar = None
-
 
 def _load_optic_flow_model(model_name, models_path, download=False):
     assert model_name == 'two_stream_dynamic_model'

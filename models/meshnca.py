@@ -136,6 +136,13 @@ class MeshNCA(MessagePassing):
             return torch.rand(pool_size, num_vertices, self.channels, device=self.device) * 0.1
 
 
+    def __repr__(self):
+        return f"MeshNCA(channels={self.channels}, fc_dim={self.fc_dim}, " \
+               f"\n\tsh_order={self.sh_order}, aggregation={self.aggr}, " \
+               f"\n\tstochastic_update={self.stochastic_update}, seed_mode={self.seed_mode}, " \
+               f"\n\tcondition={self.condition})"
+
+
 if __name__ == '__main__':
     from utils.mesh import Mesh
     from utils.camera import PerspectiveCamera
@@ -159,14 +166,16 @@ if __name__ == '__main__':
     with torch.no_grad():
         # Load a mesh from an .obj file
         # mesh = Mesh('../data/meshes/mug/mug_remesh_lvl1.obj', device=device)
-        mesh = Mesh('../data/meshes/sphere/sphere_remesh_lvl1.obj', device=device)
-        mesh = Mesh('../data/meshes/icosphere_train.obj', device=device)
+        mesh = Mesh.load_from_obj('../data/meshes/mug/mug.obj', subdivision_iter=1, device=device)
+        # mesh = Mesh.load_icosphere(2 ** 6, device=device)
+
+        print(mesh)
 
         # Define a perspective camera
         np.random.seed(42)
         # camera = PerspectiveCamera.generate_random_view_cameras(1, distance=2.0, device=device)
         camera = PerspectiveCamera()
-        renderer = Renderer(height=256, width=256, device=device)
+        renderer = Renderer(height=512, width=512, device=device)
 
         # meshnca = MeshNCA(device=device).to(device)
         x = meshnca.seed(1, mesh.Nv)
@@ -175,10 +184,9 @@ if __name__ == '__main__':
             for i in tqdm(range(360)):
                 for _ in range(4):
                     x = meshnca(x, mesh, None)
-                color = x[:, :, :3] + 0.5
+                color = x[:, :, 3:6] + 0.5
                 color = torch.clamp(color, 0.0, 1.0)
                 image = renderer.render(mesh, camera, color, True).cpu().numpy()
                 camera.rotateY(1.0)
                 image = np.hstack(image)
                 video.add(image)
-
