@@ -1,0 +1,17 @@
+.idea
+.DS_Store
+venv
+__pychache__
+.ipynb_checkpoints
+
+install_requirements.sh
+
+# Outputs and Data
+output/
+*.mp4
+data/
+configs/
+
+# PyTorch files
+*.pth
+*.pt
