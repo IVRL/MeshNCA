@@ -13,6 +13,7 @@ results/
 *.mp4
 data/
 configs/
+test.py
 
 # PyTorch files
 *.pth

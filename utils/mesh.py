@@ -66,7 +66,7 @@ class Mesh:
         # We use kaolin to load the mesh.
         # Other libraries like trimesh create duplicate vertices if a vertex has several normals.
         mesh = kaolin.io.obj.import_mesh(obj_path, with_normals=True)
-        mesh_name = obj_path.split('/')[-1]
+        mesh_name = obj_path.split('/')[-1].split(".")[0]
 
         vertices, faces = mesh.vertices, mesh.faces
 

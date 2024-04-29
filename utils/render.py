@@ -8,20 +8,28 @@ from utils.camera import PerspectiveCamera
 
 
 class Renderer:
-    def __init__(self, height=256, width=256, knum=30, sigmainv=7000, ambient_light_intensity=0.28,
-                 directional_light_intensity=1.0, device='cuda:0'):
+    def __init__(self, height=256, width=256, knum=30, sigmainv=7000,
+                 ambient_light=0.28, directional_light=1.0, device='cuda:0'):
+        """
+        :param height: Height of the rendered image
+        :param width: Width of the rendered image
+        :param knum: Number of nearest faces to consider for each pixel
+        :param sigmainv: Smoothing factor for the blending faces to make the rendering differentiable
+        :param ambient_light: Intensity of the ambient light
+        :param directional_light: Intensity of the directional light
+        :param device: PyTorch device
+        """
         self.height = height
         self.width = width
         self.knum = knum
         self.sigmainv = sigmainv
 
-        self.ambient_light_intensity = ambient_light_intensity
-        self.directional_light_intensity = directional_light_intensity
+        self.ambient_light = ambient_light
+        self.directional_light = directional_light
 
         self.device = device
 
     def render(self, mesh: Mesh, camera: PerspectiveCamera, vertex_features: torch.Tensor,
-               sh_lighting=False,
                background_color=(1.0, 1.0, 1.0),
                harc_clamp=False) -> torch.Tensor:
         """
@@ -29,7 +37,6 @@ class Renderer:
         :param mesh: Mesh object
         :param camera: PerspectiveCamera object
         :param vertex_features: torch tensor with shape [batch_size, num_vertices, num_features]
-        :param sh_lighting: bool, whether to use spherical harmonics lighting or ambient lighting
         :param background_color: tuple, the color of the background
         :param harc_clamp: bool, whether to clamp the rendered image to [0, 1]
         """
@@ -69,7 +76,8 @@ class Renderer:
         background = torch.tensor(background_color, device=self.device).view(1, 1, 1, 3) * hard_mask
 
         image_features = image_features[..., :-1]
-        if sh_lighting:
+        lighting = self.ambient_light
+        if self.directional_light > 0.0:
             with torch.no_grad():
                 image_normals = face_normals[
                     torch.arange(batch_size)[..., None, None, None],
@@ -79,10 +87,10 @@ class Renderer:
                 sh_lights = torch.tensor([0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0], device=self.device).unsqueeze(0)
                 directional_light = spherical_harmonic_lighting(image_normals, sh_lights)  # [batch_size, height, width]
                 directional_light = torch.clamp(directional_light, 0.0, 1.0)  # [batch_size, height, width, 1]
-                lighting = directional_light * self.directional_light_intensity+ self.ambient_light_intensity
+                lighting += directional_light * self.directional_light
                 lighting = lighting.unsqueeze(-1)
 
-            image_features = image_features * lighting
+        image_features = image_features * lighting
 
         image_features = image_features + background
         if harc_clamp:
@@ -113,7 +121,7 @@ if __name__ == '__main__':
         renderer = Renderer(height=512, width=512, device='cuda:0')
 
         vertex_features = torch.zeros((1, mesh.vertices.shape[0], 3), device=device) + 0.5
-        image = renderer.render(mesh, camera, vertex_features, True, background_color=(1.0, 1.0, 1.0)).cpu().numpy()
+        image = renderer.render(mesh, camera, vertex_features, background_color=(1.0, 1.0, 1.0)).cpu().numpy()
 
         image = np.hstack(image) * 255.0
         image = np.clip(image, 0, 255).astype(np.uint8)

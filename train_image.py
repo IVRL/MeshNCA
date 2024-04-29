@@ -11,9 +11,9 @@ parser.add_argument('--config', type=str, default='configs/test.yaml', help="con
 
 def main(config):
     print(config['meshnca'])
-    model = MeshNCA(**config['meshnca'])
+    # model = MeshNCA(**config['meshnca'])
 
-    print(model)
+    print(config)
 
 
 if __name__ == "__main__":

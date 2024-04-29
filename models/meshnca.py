@@ -175,7 +175,7 @@ if __name__ == '__main__':
         np.random.seed(42)
         # camera = PerspectiveCamera.generate_random_view_cameras(1, distance=2.0, device=device)
         camera = PerspectiveCamera()
-        renderer = Renderer(height=512, width=512, device=device)
+        renderer = Renderer(height=256, width=256, device=device)
 
         # meshnca = MeshNCA(device=device).to(device)
         x = meshnca.seed(1, mesh.Nv)
@@ -184,9 +184,9 @@ if __name__ == '__main__':
             for i in tqdm(range(360)):
                 for _ in range(4):
                     x = meshnca(x, mesh, None)
-                color = x[:, :, 3:6] + 0.5
+                color = x[:, :, 4:7] + 0.5
                 color = torch.clamp(color, 0.0, 1.0)
-                image = renderer.render(mesh, camera, color, True).cpu().numpy()
+                image = renderer.render(mesh, camera, color).cpu().numpy()
                 camera.rotateY(1.0)
                 image = np.hstack(image)
                 video.add(image)
