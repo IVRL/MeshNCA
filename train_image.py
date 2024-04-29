@@ -2,6 +2,7 @@ import os
 import yaml
 import argparse
 import shutil
+import wandb
 
 from models.meshnca import MeshNCA
 
@@ -10,10 +11,12 @@ parser.add_argument('--config', type=str, default='configs/test.yaml', help="con
 
 
 def main(config):
-    print(config['meshnca'])
-    # model = MeshNCA(**config['meshnca'])
+    model = MeshNCA(**config['meshnca'])
 
-    print(config)
+    if 'wandb' in config and False:
+        wandb.login(key=config['wandb']['key'], relogin=True)
+        wandb.init(project=config['wandb']['project'], name=config['experiment_name'],
+                   dir=config['experiment_path'], config=config)
 
 
 if __name__ == "__main__":

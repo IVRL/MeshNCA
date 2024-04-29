@@ -14,7 +14,7 @@ def main():
     # Download the datasets
     if not os.path.exists("data/pbr_textures"):
         image_dataset_url = (
-            "https://drive.google.com/uc?id=16dQT_8hYl6qRMQe6J3NF6Y3NA5w2Ya4v"
+            "https://drive.google.com/uc?id=1TsA3fyr1OU_1C4Rk5rtBp-Zzr_54Bofn"
         )
         gdown.download(image_dataset_url, "data/pbr_textures.zip", quiet=False)
         print("Unzipping the PBR Texture dataset")
@@ -35,9 +35,23 @@ def main():
         with zipfile.ZipFile("data/meshes.zip", "r") as zip_ref:
             zip_ref.extractall("data/meshes")
         os.remove("data/meshes.zip")
+    else:
+        print("Mesh dataset is already downloaded.")
+        print("Remove the existing folder at data/meshes to download again.\n")
+
+    if not os.path.exists("data/textures"):
+        texture_dataset_url = (
+            "https://drive.google.com/uc?id=1Wv7vvPGMf3V4tuv2OL12jewBNTsRUP8S"
+        )
+        gdown.download(texture_dataset_url, "data/textures.zip", quiet=False)
+        print("Unzipping the Texture dataset")
+        with zipfile.ZipFile("data/textures.zip", "r") as zip_ref:
+            zip_ref.extractall("data/textures")
+        os.remove("data/textures.zip")
+    else:
+        print("Texture dataset is already downloaded.")
+        print("Remove the existing folder at data/textures to download again.\n")
 
 
 if __name__ == "__main__":
     main()
-
-

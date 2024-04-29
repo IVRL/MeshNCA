@@ -3,7 +3,9 @@ from moviepy.video.io.ffmpeg_writer import FFMPEG_VideoWriter
 import moviepy.editor as mvp
 
 import os
+
 os.environ['FFMPEG_BINARY'] = 'ffmpeg'
+
 
 class VideoWriter:
     def __init__(self, filename='tmp.mp4', fps=30.0, autoplay=False, **kw):
