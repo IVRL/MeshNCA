@@ -148,6 +148,8 @@ class AppearanceLoss(torch.nn.Module):
                     torch.hstack([images[i, j] for j in range(images.shape[1])])
                     for i in range(images.shape[0])
                 ])
+                images = torch.clamp(images, 0.0, 1.0)
+                # @TODO don't use to pil image. It's garbage.
                 summary = {
                     "images": TF.to_pil_image(images.permute(2, 0, 1).cpu())
                 }
