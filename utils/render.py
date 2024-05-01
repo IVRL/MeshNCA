@@ -9,7 +9,7 @@ from utils.camera import PerspectiveCamera
 
 class Renderer:
     def __init__(self, height=256, width=256, knum=30, sigmainv=7000,
-                 ambient_light=0.28, directional_light=1.0, device='cuda:0'):
+                 ambient_light=0.28, directional_light=1.0, background_color=1.0):
         """
         :param height: Height of the rendered image
         :param width: Width of the rendered image
@@ -17,7 +17,7 @@ class Renderer:
         :param sigmainv: Smoothing factor for the blending faces to make the rendering differentiable
         :param ambient_light: Intensity of the ambient light
         :param directional_light: Intensity of the directional light
-        :param device: PyTorch device
+        :param background_color: float, 1.0 is white and 0.0 is black
         """
         self.height = height
         self.width = width
@@ -27,39 +27,49 @@ class Renderer:
         self.ambient_light = ambient_light
         self.directional_light = directional_light
 
-        self.device = device
+        self.background_color = background_color
 
     def render(self, mesh: Mesh, camera: PerspectiveCamera, vertex_features: torch.Tensor,
-               background_color=(1.0, 1.0, 1.0),
+
                harc_clamp=False) -> torch.Tensor:
         """
         Render the mesh using the specified camera.
         :param mesh: Mesh object
         :param camera: PerspectiveCamera object
+            should have the following attributes: camera.projection_matrix, camera.transform_matrix
+            camera.proj_matrix: torch tensor with shape [3, 1]
+            camera.transform_matrix: torch tensor with shape [num_views, 4, 3]
         :param vertex_features: torch tensor with shape [batch_size, num_vertices, num_features]
-        :param background_color: tuple, the color of the background
+
         :param harc_clamp: bool, whether to clamp the rendered image to [0, 1]
+
+        :return: the rendered images from all views [batch_size, num_views, height, width, num_features]
         """
+        device = vertex_features.device
+        batch_size = vertex_features.shape[0]
+        num_views = camera.transform_matrix.shape[0]
 
-        batch_size = max(vertex_features.shape[0], camera.elevation.shape[0])
-
-        # face_vertices_world [batch_size, num_faces, 3, 3] the world coordinates of the vertices for each face
-        # face_vertices_image [batch_size, num_faces, 3, 2] the projected coordinates of the vertices for each face
-        # face_normals [batch_size, num_faces, 3] the normals of the faces
+        # face_vertices_world [num_views, num_faces, 3, 3] the world coordinates of the vertices for each face
+        # face_vertices_image [num_views, num_faces, 3, 2] the projected coordinates of the vertices for each face
+        # face_normals [num_views, num_faces, 3] the normals of the faces
         face_vertices_world, face_vertices_image, face_normals = prepare_vertices(mesh.vertices,
                                                                                   mesh.faces,
                                                                                   camera_proj=camera.projection_matrix,
                                                                                   camera_transform=camera.transform_matrix)
 
-        face_features = mesh.vertex2face_features(vertex_features)  # [batch_size, num_faces, 3, num_features]
-        background = torch.ones(face_features.shape[0], face_features.shape[1], 3, 1, device=self.device)
-        face_features = torch.cat([face_features, background], dim=-1)
-        if face_features.shape[0] == 1:
-            face_features = face_features.repeat(batch_size, 1, 1, 1)
+        ## Repeat these tensors to match the batch size
+        face_vertices_world = face_vertices_world.repeat(batch_size, 1, 1, 1)  # [batch_size*num_views, ...]
+        face_vertices_image = face_vertices_image.repeat(batch_size, 1, 1, 1)  # [batch_size, ...]
+        face_normals = face_normals.repeat(batch_size, 1, 1)  # [batch_size, ...]
 
-        # image_features [batch_size, height, width, num_features + 1] the rendered features for each pixel
-        # soft_mask [batch_size, height, width] the mask showing if a pixel is on the mesh or not
-        # face_ids [batch_size, height, width] the face id for each pixel
+        face_features = mesh.vertex2face_features(vertex_features)  # [batch_size, num_faces, 3, num_features]
+        background = torch.ones(face_features.shape[0], face_features.shape[1], 3, 1, device=device)
+        face_features = torch.cat([face_features, background], dim=-1)  # [batch_size, num_faces, 3, num_features+1]
+        face_features = face_features.repeat_interleave(repeats=num_views, dim=0)  # [batch_size*num_views, ...]
+
+        # image_features [batch_size*num_views, height, width, num_features + 1] the rendered features for each pixel
+        # soft_mask [batch_size*num_views, height, width] the mask showing if a pixel is on the mesh or not
+        # face_ids [batch_size*num_views, height, width] the face id for each pixel
         image_features, soft_mask, face_ids = dibr_rasterization(height=self.height, width=self.width,
                                                                  face_vertices_z=face_vertices_world[..., -1],
                                                                  face_vertices_image=face_vertices_image,
@@ -72,19 +82,18 @@ class Renderer:
         # Using the actual face normals face_normals_z=face_normals[..., -1] will cause artifacts in the rendered image.
         # Instead, we use a constant value of 1.0 for the face normals.
 
-        hard_mask = (image_features[..., -1:] < 0.95).float()
-        background = torch.tensor(background_color, device=self.device).view(1, 1, 1, 3) * hard_mask
+        background = (image_features[..., -1:] < 0.95).float() * self.background_color
 
         image_features = image_features[..., :-1]
         lighting = self.ambient_light
         if self.directional_light > 0.0:
             with torch.no_grad():
                 image_normals = face_normals[
-                    torch.arange(batch_size)[..., None, None, None],
+                    torch.arange(batch_size * num_views)[..., None, None, None],
                     face_ids[..., None],
                     torch.arange(3)[None, None, None, :],
                 ]  # [batch_size, height, width, 3]
-                sh_lights = torch.tensor([0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0], device=self.device).unsqueeze(0)
+                sh_lights = torch.tensor([0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0], device=device).unsqueeze(0)
                 directional_light = spherical_harmonic_lighting(image_normals, sh_lights)  # [batch_size, height, width]
                 directional_light = torch.clamp(directional_light, 0.0, 1.0)  # [batch_size, height, width, 1]
                 lighting += directional_light * self.directional_light
@@ -96,6 +105,7 @@ class Renderer:
         if harc_clamp:
             image_features = torch.clamp(image_features, 0.0, 1.0)
 
+        image_features = image_features.view(batch_size, num_views, self.height, self.width, -1)
         return image_features
 
 
@@ -118,12 +128,17 @@ if __name__ == '__main__':
         np.random.seed(42)
         # Render the mesh from 6 random viewpoints
         camera = PerspectiveCamera.generate_random_view_cameras(6, distance=2.0, device=device)
-        renderer = Renderer(height=512, width=512, device='cuda:0')
+        renderer = Renderer(height=512, width=512, background_color=1.0)
 
-        vertex_features = torch.zeros((1, mesh.vertices.shape[0], 3), device=device) + 0.5
-        image = renderer.render(mesh, camera, vertex_features, background_color=(1.0, 1.0, 1.0)).cpu().numpy()
+        vertex_features = torch.zeros((2, mesh.vertices.shape[0], 3), device=device) + 0.5
+        vertex_features[1] *= 1.5
+        image = renderer.render(mesh, camera, vertex_features).cpu().numpy()
+        # image: [batch_size, num_views, height, width, num_features]
+        print(image.shape)
 
-        image = np.hstack(image) * 255.0
+        image1 = np.hstack(image[0]) * 255.0
+        image2 = np.hstack(image[1]) * 255.0
+        image = np.vstack([image1, image2])
         image = np.clip(image, 0, 255).astype(np.uint8)
         Image.fromarray(image).show()
 

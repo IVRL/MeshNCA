@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from appearance_loss import AppearanceLoss
+from losses.appearance_loss import AppearanceLoss
 
 
 class Loss(torch.nn.Module):

@@ -53,10 +53,10 @@ class PerspectiveCamera:
         self._update_camera()
 
     @staticmethod
-    def generate_random_view_cameras(num_cameras, distance=2.0, **kwargs):
-        azimuth = np.random.rand(num_cameras) * 360.0
-        elevation = np.arcsin(np.random.rand(num_cameras) * 2.0 - 1.0) * 180.0 / np.pi
-        distance = np.ones(num_cameras) * distance
+    def generate_random_view_cameras(num_views, distance=2.5, **kwargs):
+        azimuth = np.random.rand(num_views) * 360.0
+        elevation = np.arcsin(np.random.rand(num_views) * 2.0 - 1.0) * 180.0 / np.pi
+        distance = np.ones(num_views) * distance
 
         return PerspectiveCamera(elevation=elevation, azimuth=azimuth, distance=distance, **kwargs)
 

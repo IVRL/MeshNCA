@@ -36,7 +36,6 @@ class AppearanceLoss(torch.nn.Module):
 
         self.vgg_layers = vgg_layers
 
-
         self.device = device
 
         self.vgg = torch_models.vgg16(weights=torch_models.VGG16_Weights.IMAGENET1K_FEATURES).features.to(device)
@@ -44,6 +43,14 @@ class AppearanceLoss(torch.nn.Module):
         self._load_target_images(low_pass_filter=True)
 
         self.style_loss_fn = OptimalTransportLoss(n_samples=1024)
+
+    def get_target_channels(self):
+        channels = []
+        for chn_min, chn_max in self.target_channels:
+            for ch in range(chn_min, chn_max):
+                channels.append(ch)
+
+        return channels
 
     def get_vgg_features(self, x, flatten=False, include_image_as_feature=False):
         """
@@ -75,7 +82,7 @@ class AppearanceLoss(torch.nn.Module):
         return features
 
     @torch.no_grad()
-    def _load_target_images(self, low_pass_filter=False):
+    def _load_target_images(self, low_pass_filter=True):
         target_images = []
         total_channels = 0
         for i, target_image_path in enumerate(self.target_images_path):
@@ -104,22 +111,22 @@ class AppearanceLoss(torch.nn.Module):
         """
 
         :param input_dict:  A dictionary containing the necessary tensors for calculating the appearance loss.
-                            required keys: ['generated_images']: a tensor of shape [b, c, h, w]
-                            The generated images should be in range [0, 1].
+                            required keys: ['rendered_images']: a tensor of shape [b, c, h, w]
+                            The rendered images should be in range [0, 1].
                             The number of channels c should match the total number of target channels.
         :param return_summary: Whether to return a summary dictionary
         :return: A tuple (loss, loss_log dictionary, summary dictionary)
         """
 
-        channels = input_dict['generated_images'].shape[1]
+        channels = input_dict['rendered_images'].shape[1]
         assert channels >= self.total_channels, \
             f"Target images have {self.total_channels} channels in total," \
-            f"but the generated images have {channels} channels."
+            f"but the rendered images have {channels} channels."
 
         xs = []
         for cmin, cmax in self.target_channels:
-            assert cmax <= channels, f"Channel index {cmax} is out of bounds for the generated images."
-            x = input_dict['generated_images'][:, cmin:cmax]
+            assert cmax <= channels, f"Channel index {cmax} is out of bounds for the rendered images."
+            x = input_dict['rendered_images'][:, cmin:cmax]
 
             # Resize if the image size is different from the target image size
             if x.shape[2] != self.image_size[0] or x.shape[3] != self.image_size[1]:
@@ -131,12 +138,24 @@ class AppearanceLoss(torch.nn.Module):
 
             xs.append(x)
 
-        generated_images = torch.stack(xs, dim=1)  # [b, n_targets, c, h, w]
+        generated_images = torch.stack(xs, dim=1)  # [b, n_targets, 3, h, w]
+
+        summary = None
+        if return_summary:
+            with torch.no_grad():
+                images = generated_images.permute(0, 1, 3, 4, 2)
+                images = torch.vstack([
+                    torch.hstack([images[i, j] for j in range(images.shape[1])])
+                    for i in range(images.shape[0])
+                ])
+                summary = {
+                    "images": TF.to_pil_image(images.permute(2, 0, 1).cpu())
+                }
         generated_images = generated_images.view(-1, generated_images.shape[2], generated_images.shape[3],
                                                  generated_images.shape[4])
         generated_features = self.get_vgg_features(generated_images)
 
-        return self.style_loss_fn(self.target_features, generated_features), None, None
+        return self.style_loss_fn(self.target_features, generated_features), None, summary
 
 
 class OptimalTransportLoss(torch.nn.Module):
@@ -277,11 +296,12 @@ if __name__ == '__main__':
         "../data/pbr_textures/Abstract_008/albedo.jpg",
         "../data/pbr_textures/Abstract_008/height.jpg",
         "../data/pbr_textures/Abstract_008/normal.jpg",
-    ], target_channels=[(0, 3), (3, 4), (5, 8)])
+    ], target_channels=[(0, 3), (3, 4), (4, 7)])
 
     input_dict = {
-        'generated_images': torch.rand(4, 9, 320, 320).to("cuda:0")
+        'rendered_images': torch.rand(4, 9, 320, 320).to("cuda:0")
     }
 
     loss = loss_fn(input_dict)
+    print(loss_fn.get_target_channels())
     print(loss)

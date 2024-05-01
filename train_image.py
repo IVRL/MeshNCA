@@ -1,22 +1,100 @@
 import os
+import numpy as np
+import torch
 import yaml
 import argparse
 import shutil
 import wandb
+from tqdm import tqdm
 
+from losses.loss import Loss
 from models.meshnca import MeshNCA
+from utils.camera import PerspectiveCamera
+from utils.mesh import Mesh
+from utils.render import Renderer
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', type=str, default='configs/test.yaml', help="configuration")
 
 
 def main(config):
-    model = MeshNCA(**config['meshnca'])
+    device = torch.device(config['device'])
 
-    if 'wandb' in config and False:
+    if 'wandb' in config and True:
         wandb.login(key=config['wandb']['key'], relogin=True)
         wandb.init(project=config['wandb']['project'], name=config['experiment_name'],
                    dir=config['experiment_path'], config=config)
+
+    def get_device_config(cfg):
+        cfg['device'] = device
+        return cfg
+
+    meshnca_config = get_device_config(config['meshnca'])
+    model = MeshNCA(**meshnca_config).to(device)
+
+    with torch.no_grad():
+        icosphere_config = get_device_config(config['train']['icosphere'])
+        icosphere = Mesh.load_icosphere(**icosphere_config)
+
+        pool = model.seed(config['train']['pool_size'], icosphere.Nv)
+
+        loss_fn = Loss(**config['loss'])
+
+        renderer = Renderer(**config['renderer'])
+        render_channels = loss_fn.loss_mapper['appearance'].get_target_channels()
+        camera_config = get_device_config(config['train']['camera'])
+
+        test_mesh_config = get_device_config(config['train']['test_mesh'])
+        test_mesh = Mesh.load_from_obj(**test_mesh_config)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=config['train']['lr'])
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=config['train']['lr_decay_steps'],
+                                                        gamma=config['train']['lr_decay_gamma'])
+
+    step_range = config['train']['step_range']
+    inject_seed_interval = config['train']['inject_seed_interval']
+    batch_size = config['train']['batch_size']
+    epochs = config['train']['epochs']
+    for epoch in tqdm(range(epochs)):
+        with torch.no_grad():
+            batch_idx = np.random.choice(len(pool), batch_size, replace=False)
+
+            x = pool[batch_idx]
+            if epoch % 8 == 0:
+                x[:1] = model.seed(1, icosphere.Nv)
+
+        step_n = np.random.randint(step_range[0], step_range[1])
+        for _ in range(step_n):
+            x = model(x, icosphere, None)
+
+        x_render = x[..., render_channels] + 0.5
+        camera = PerspectiveCamera.generate_random_view_cameras(**camera_config)
+
+        rendered_image = renderer.render(icosphere, camera, x_render)
+        # rendered_image: [batch_size, num_views, height, width, num_features]
+        rendered_image = torch.flatten(rendered_image, start_dim=0, end_dim=1).permute(0, 3, 1, 2)
+        # rendered_image: [batch_size * num_views, num_features, height, width]
+
+        input_dict = {
+            'rendered_images': rendered_image,
+            'nca_state': x,
+        }
+        return_summary = epoch % config['train']['summary_interval'] == 0
+        loss, loss_log, summary = loss_fn(input_dict, return_summary=return_summary)
+
+        with torch.no_grad():
+            loss.backward()
+            for p in model.parameters():
+                p.grad /= (p.grad.norm() + 1e-8)  # normalize gradients
+            optimizer.step()
+            optimizer.zero_grad()
+            lr_scheduler.step()
+            pool[batch_idx] = x  # update pool
+
+        wandb.log(loss_log, step=epoch)
+        if return_summary:
+            wandb.log({'rendered images': wandb.Image(summary['appearance-images'], caption='Rendered Images')},
+                      step=epoch)
 
 
 if __name__ == "__main__":
