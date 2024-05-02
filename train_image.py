@@ -60,7 +60,7 @@ def main(config):
             batch_idx = np.random.choice(len(pool), batch_size, replace=False)
 
             x = pool[batch_idx]
-            if epoch % 8 == 0:
+            if epoch % inject_seed_interval == 0:
                 x[:1] = model.seed(1, icosphere.Nv)
 
         step_n = np.random.randint(step_range[0], step_range[1])
@@ -79,7 +79,7 @@ def main(config):
             'rendered_images': rendered_image,
             'nca_state': x,
         }
-        return_summary = epoch % config['train']['summary_interval'] == 0
+        return_summary = (epoch + 1) % config['train']['summary_interval'] == 0
         loss, loss_log, summary = loss_fn(input_dict, return_summary=return_summary)
 
         with torch.no_grad():

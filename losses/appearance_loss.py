@@ -1,6 +1,7 @@
 import torch
 import torchvision.models as torch_models
 import torchvision.transforms.functional as TF
+from PIL import Image
 
 from utils.misc import load_texture_image
 
@@ -14,23 +15,21 @@ class AppearanceLoss(torch.nn.Module):
                  device='cuda:0'):
         """
         :param image_size: Image resolution used for calculating the appearance  loss
-        :param target_images_path: str or list of str, path to the target images
-        :param target_channels: tuple or list of tuples, corresponding MeshNCA channels for the target images
+        :param target_images_path: str or a dictionary of strings, path to the target images
+        :param target_channels: tuple or a dictionary of tuples, corresponding MeshNCA channels for the target images
         :param vgg_layers: VGG layers used for calculating the style loss
-        :param style_loss_weight: Weight of the style loss
-        :param color_matching_loss_weight: Weight of the color matching loss
         :param device: PyTorch device
         """
         super(AppearanceLoss, self).__init__()
 
         self.image_size = image_size
-        if not isinstance(target_images_path, list):
-            self.target_images_path = [target_images_path]
+        if not isinstance(target_images_path, dict):
+            self.target_images_path = {"RGB": target_images_path}
         else:
             self.target_images_path = target_images_path
 
-        if not isinstance(target_channels, list):
-            self.target_channels = [target_channels]
+        if not isinstance(target_channels, dict):
+            self.target_channels = {"RGB": target_channels}
         else:
             self.target_channels = target_channels
 
@@ -46,7 +45,7 @@ class AppearanceLoss(torch.nn.Module):
 
     def get_target_channels(self):
         channels = []
-        for chn_min, chn_max in self.target_channels:
+        for chn_min, chn_max in self.target_channels.values():
             for ch in range(chn_min, chn_max):
                 channels.append(ch)
 
@@ -85,7 +84,8 @@ class AppearanceLoss(torch.nn.Module):
     def _load_target_images(self, low_pass_filter=True):
         target_images = []
         total_channels = 0
-        for i, target_image_path in enumerate(self.target_images_path):
+        for i, key in enumerate(self.target_images_path):
+            target_image_path = self.target_images_path[key]
             if low_pass_filter:
                 target_image, _ = load_texture_image(target_image_path, (128, 128))
                 target_image = TF.resize(target_image, self.image_size, antialias=True)
@@ -95,16 +95,16 @@ class AppearanceLoss(torch.nn.Module):
             target_image = target_image.to(self.device)
             target_images.append(target_image)
 
-            chn_min, chn_max = self.target_channels[i]
+            chn_min, chn_max = self.target_channels[key]
             assert chn_max - chn_min == 3 or chn_max - chn_min == 1, \
                 "Either RGB or mono-color images are supported. " \
                 "The mono-color images will be repeated to 3 channels for calculating the loss."
             assert chn_min >= 0, "Channel index must be greater than or equal to 0."
             total_channels += chn_max - chn_min
 
-        target_images = torch.cat(target_images, dim=0)
+        self.target_images = torch.cat(target_images, dim=0)
 
-        self.target_features = self.get_vgg_features(target_images)
+        self.target_features = self.get_vgg_features(self.target_images)
         self.total_channels = total_channels
 
     def forward(self, input_dict, return_summary=True):
@@ -124,7 +124,8 @@ class AppearanceLoss(torch.nn.Module):
             f"but the rendered images have {channels} channels."
 
         xs = []
-        for cmin, cmax in self.target_channels:
+        for key in self.target_channels:
+            cmin, cmax = self.target_channels[key]
             assert cmax <= channels, f"Channel index {cmax} is out of bounds for the rendered images."
             x = input_dict['rendered_images'][:, cmin:cmax]
 
@@ -148,16 +149,22 @@ class AppearanceLoss(torch.nn.Module):
                     torch.hstack([images[i, j] for j in range(images.shape[1])])
                     for i in range(images.shape[0])
                 ])
-                images = torch.clamp(images, 0.0, 1.0)
-                # @TODO don't use to pil image. It's garbage.
+                images = torch.clamp(images, 0.0, 1.0).cpu().numpy()
+                images = (images * 255).astype('uint8')
                 summary = {
-                    "images": TF.to_pil_image(images.permute(2, 0, 1).cpu())
+                    "images": Image.fromarray(images)
                 }
         generated_images = generated_images.view(-1, generated_images.shape[2], generated_images.shape[3],
                                                  generated_images.shape[4])
         generated_features = self.get_vgg_features(generated_images)
 
-        return self.style_loss_fn(self.target_features, generated_features), None, summary
+        loss = self.style_loss_fn(self.target_features, generated_features)  # [n_targets]
+
+        loss_log = {
+            k: loss[i] for i, k in enumerate(self.target_channels)
+        }
+
+        return loss.mean(), loss_log, summary
 
 
 class OptimalTransportLoss(torch.nn.Module):
@@ -252,7 +259,7 @@ class OptimalTransportLoss(torch.nn.Module):
         :param generated_features:  List of features for the generated images.
                                     Each feature is of shape (b * n_targets, c, h, w) with varying c, h, w
 
-        :return: The OT style loss between the target and generated features
+        :return: The OT style loss between the target and generated features [n_targets]
         """
         loss = 0.0
 
@@ -267,6 +274,7 @@ class OptimalTransportLoss(torch.nn.Module):
             assert batch_size * n_targets == b, "Batch size must be a multiple of the number of target images"
 
             # We repeat the target features to match the batch size of the generated features
+            # y = y.repeat_interleave(repeats=batch_size, dim=0)
             y = y.repeat(batch_size, 1, 1, 1)
 
             n_x, n_y = h_x * w_x, h_y * w_y
@@ -277,10 +285,12 @@ class OptimalTransportLoss(torch.nn.Module):
             n_samples = min(n_x, n_y, self.n_samples)
 
             indices_x = torch.argsort(torch.rand(b, 1, n_x, device=x.device), dim=-1)[..., :n_samples]
-            x = x.expand(b, c_x, n_x).gather(-1, indices_x.expand(b, c_x, n_samples))
+            print(indices_x.shape, x.shape)
+            x = x.gather(-1, indices_x.expand(b, c_x, n_samples))
+            print(x.shape)
 
             indices_y = torch.argsort(torch.rand(b, 1, n_y, device=y.device), dim=-1)[..., :n_samples]
-            y = y.expand(b, c_y, n_y).gather(-1, indices_y.expand(b, c_y, n_samples))
+            y = y.gather(-1, indices_y.expand(b, c_y, n_samples))
 
             x = x.transpose(1, 2)  # (b, n_samples, c)
             y = y.transpose(1, 2)  # (b, n_samples, c)
@@ -288,22 +298,33 @@ class OptimalTransportLoss(torch.nn.Module):
             layer_loss = OptimalTransportLoss.style_loss(x, y) + OptimalTransportLoss.moment_loss(x, y)
             loss += layer_loss * layer_weight
 
-        return loss.mean()
+        loss = loss.view(batch_size, n_targets).mean(dim=0)
+        return loss  # [n_targets]
 
 
 if __name__ == '__main__':
     # loss_fn = AppearanceLoss(target_images_path="../data/textures/bubbly_0101.jpg")
 
-    loss_fn = AppearanceLoss(target_images_path=[
-        "../data/pbr_textures/Abstract_008/albedo.jpg",
-        "../data/pbr_textures/Abstract_008/height.jpg",
-        "../data/pbr_textures/Abstract_008/normal.jpg",
-    ], target_channels=[(0, 3), (3, 4), (4, 7)])
+    loss_fn = AppearanceLoss(target_images_path={
+        "albedo": "../data/pbr_textures/Abstract_008/albedo.jpg",
+        "height": "../data/pbr_textures/Abstract_008/height.jpg",
+        "normal": "../data/pbr_textures/Abstract_008/normal.jpg",
+    }, target_channels={
+        "albedo": (0, 3),
+        "height": (3, 4),
+        "normal": (4, 7)
+    })
 
-    input_dict = {
-        'rendered_images': torch.rand(4, 9, 320, 320).to("cuda:0")
-    }
+    with torch.no_grad():
+        x = loss_fn.target_images.reshape(-1, 224, 224).unsqueeze(0).repeat(4, 1, 1, 1)
+        x = x[:, [0, 1, 2, 3, 6, 7, 8]]
+        x[0, :3] = torch.rand_like(x[0, :3])
+        input_dict = {
+            'rendered_images': x
+        }
 
-    loss = loss_fn(input_dict)
-    print(loss_fn.get_target_channels())
-    print(loss)
+        loss, loss_log, summary = loss_fn(input_dict)
+    print(loss_log)
+    summary['images'].show()
+
+    print(loss_fn.target_images.shape)
