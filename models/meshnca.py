@@ -11,7 +11,7 @@ class MeshNCA(MessagePassing):
     def __init__(self, channels=16, fc_dim=128,
                  sh_order=1, aggregation='sum',
                  stochastic_update=True, seed_mode='zeros',
-                 condition=None, device='cuda:0'):
+                 condition=None, target_channels=(0, 3), device='cuda:0'):
         super(MeshNCA, self).__init__(aggr=aggregation)
         self.channels = channels
         self.fc_dim = fc_dim
@@ -27,11 +27,17 @@ class MeshNCA(MessagePassing):
 
         self.device = device
 
+        if not isinstance(target_channels, dict):
+            self.target_channels = {"rgb": target_channels}
+        else:
+            self.target_channels = target_channels
+
         num_sh = (sh_order + 1) ** 2  # Number of spherical harmonics coefficients
         self.fc1 = torch.nn.Linear((num_sh + 1) * channels, fc_dim, bias=True)
         self.fc2 = torch.nn.Linear(fc_dim, channels, bias=True)
         torch.nn.init.xavier_normal_(self.fc1.weight, gain=0.2)
         torch.nn.init.xavier_normal_(self.fc2.weight, gain=1.2)
+        torch.nn.init.zeros_(self.fc2.bias)
 
         self.adaptation_mlp = torch.nn.Sequential(
             self.fc1,
@@ -40,6 +46,15 @@ class MeshNCA(MessagePassing):
         )
 
         self.sh_func = rsh_functions[sh_order]
+
+    def get_render_channels(self):
+        render_channels = []
+        for key in sorted(self.target_channels):
+            c_min, c_max = self.target_channels[key]
+            render_channels += list(range(c_min, c_max))
+
+        return render_channels
+
 
     def message(self, x_j: torch.Tensor, x_i: torch.Tensor) -> torch.Tensor:
         """
@@ -134,7 +149,6 @@ class MeshNCA(MessagePassing):
             return torch.zeros(pool_size, num_vertices, self.channels, device=self.device)
         elif self.seed_mode == 'random':
             return torch.rand(pool_size, num_vertices, self.channels, device=self.device) * 0.1
-
 
     def __repr__(self):
         return f"MeshNCA(channels={self.channels}, fc_dim={self.fc_dim}, " \

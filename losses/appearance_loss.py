@@ -10,7 +10,7 @@ class AppearanceLoss(torch.nn.Module):
     def __init__(self,
                  image_size=(224, 224),
                  target_images_path="data/textures/bubbly_0101.jpg",
-                 target_channels=(0, 3),
+                 target_channels=3,
                  vgg_layers=(1, 3, 6, 8, 11, 13, 15, 22, 29),
                  device='cuda:0'):
         """
@@ -41,17 +41,9 @@ class AppearanceLoss(torch.nn.Module):
 
         self._load_target_images(low_pass_filter=True)
 
-        self.style_loss_fn = OptimalTransportLoss(n_samples=1024)
+        self.style_loss_fn = OptimalTransportLoss(n_samples=1024, device=self.device)
 
-    def get_target_channels(self):
-        channels = []
-        for chn_min, chn_max in self.target_channels.values():
-            for ch in range(chn_min, chn_max):
-                channels.append(ch)
-
-        return channels
-
-    def get_vgg_features(self, x, flatten=False, include_image_as_feature=False):
+    def get_vgg_features(self, x, flatten=False, include_image_as_feature=True):
         """
 
         :param x: input images [b, c, h, w]
@@ -84,7 +76,7 @@ class AppearanceLoss(torch.nn.Module):
     def _load_target_images(self, low_pass_filter=True):
         target_images = []
         total_channels = 0
-        for i, key in enumerate(self.target_images_path):
+        for i, key in enumerate(sorted(self.target_images_path)):
             target_image_path = self.target_images_path[key]
             if low_pass_filter:
                 target_image, _ = load_texture_image(target_image_path, (128, 128))
@@ -95,12 +87,11 @@ class AppearanceLoss(torch.nn.Module):
             target_image = target_image.to(self.device)
             target_images.append(target_image)
 
-            chn_min, chn_max = self.target_channels[key]
-            assert chn_max - chn_min == 3 or chn_max - chn_min == 1, \
+            chn = self.target_channels[key]
+            assert chn == 3 or chn == 1, \
                 "Either RGB or mono-color images are supported. " \
                 "The mono-color images will be repeated to 3 channels for calculating the loss."
-            assert chn_min >= 0, "Channel index must be greater than or equal to 0."
-            total_channels += chn_max - chn_min
+            total_channels += chn
 
         self.target_images = torch.cat(target_images, dim=0)
 
@@ -119,22 +110,24 @@ class AppearanceLoss(torch.nn.Module):
         """
 
         channels = input_dict['rendered_images'].shape[1]
-        assert channels >= self.total_channels, \
+        assert channels == self.total_channels, \
             f"Target images have {self.total_channels} channels in total," \
             f"but the rendered images have {channels} channels."
 
         xs = []
-        for key in self.target_channels:
-            cmin, cmax = self.target_channels[key]
-            assert cmax <= channels, f"Channel index {cmax} is out of bounds for the rendered images."
-            x = input_dict['rendered_images'][:, cmin:cmax]
+        c_start = 0
+        for key in sorted(self.target_channels):
+            chn = self.target_channels[key]
+            c_end = c_start + chn
+            x = input_dict['rendered_images'][:, c_start:c_end]
+            c_start = c_end
 
             # Resize if the image size is different from the target image size
             if x.shape[2] != self.image_size[0] or x.shape[3] != self.image_size[1]:
                 x = TF.resize(x, self.image_size, antialias=True)
 
             # Repeat the mono-color images to 3 channels
-            if cmax - cmin == 1:
+            if chn == 1:
                 x = x.repeat(1, 3, 1, 1)
 
             xs.append(x)
@@ -145,8 +138,9 @@ class AppearanceLoss(torch.nn.Module):
         if return_summary:
             with torch.no_grad():
                 images = generated_images.permute(0, 1, 3, 4, 2)
-                images = torch.vstack([
-                    torch.hstack([images[i, j] for j in range(images.shape[1])])
+                images = torch.cat([self.target_images.permute(0, 2, 3, 1).unsqueeze(0), images], dim=0)
+                images = torch.hstack([
+                    torch.vstack([images[i, j] for j in range(images.shape[1])])
                     for i in range(images.shape[0])
                 ])
                 images = torch.clamp(images, 0.0, 1.0).cpu().numpy()
@@ -161,17 +155,50 @@ class AppearanceLoss(torch.nn.Module):
         loss = self.style_loss_fn(self.target_features, generated_features)  # [n_targets]
 
         loss_log = {
-            k: loss[i] for i, k in enumerate(self.target_channels)
+            k: loss[i] for i, k in enumerate(sorted(self.target_channels))
         }
 
         return loss.mean(), loss_log, summary
 
 
 class OptimalTransportLoss(torch.nn.Module):
-    def __init__(self, n_samples=1024):
+    def __init__(self, n_samples=1024, device='cuda:0'):
         super().__init__()
 
         self.n_samples = n_samples
+
+        self.device = device
+        self.color_transform = torch.tensor(
+            [[0.577350, 0.577350, 0.577350],
+             [-0.577350, 0.788675, -0.211325],
+             [-0.577350, -0.211325, 0.788675]], device=device, requires_grad=False)  # [3, 3] matrix
+
+    def rgb_to_yuv(self, rgb):
+        """
+        :param rgb: Torch tensor of shape [b, n, 3]
+        :return: YUV colors of shape [b, n, 3]
+        """
+        return torch.einsum('bnc,ck->bnk', rgb, self.color_transform)
+
+    def color_matching_loss(self, x, y):
+        """
+        Color matching distance between two RGB images.
+        :param x: (b, n, 3)
+        :param y: (b, m, 3)
+
+        :return: (b, n, m)
+        """
+        x_yuv = self.rgb_to_yuv(x)
+        y_yuv = self.rgb_to_yuv(y)
+
+        pairwise_distance = self.pairwise_distances_l2(x_yuv, y_yuv) + self.pairwise_distances_cos(x_yuv, y_yuv)
+
+        m1, m1_inds = pairwise_distance.min(1)
+        m2, m2_inds = pairwise_distance.min(2)
+
+        remd = torch.max(m1.mean(dim=1), m2.mean(dim=1))
+
+        return remd
 
     @staticmethod
     def pairwise_distances_l2(x, y):
@@ -246,9 +273,7 @@ class OptimalTransportLoss(torch.nn.Module):
         y_cov = torch.matmul(y_c.transpose(1, 2), y_c) / (y.shape[1] - 1)
 
         cov_diff = torch.abs(x_cov - y_cov).mean(dim=(1, 2))
-        loss = mu_diff + cov_diff
-
-        return loss
+        return mu_diff + cov_diff
 
     def forward(self, target_features, generated_features):
         """
@@ -285,9 +310,7 @@ class OptimalTransportLoss(torch.nn.Module):
             n_samples = min(n_x, n_y, self.n_samples)
 
             indices_x = torch.argsort(torch.rand(b, 1, n_x, device=x.device), dim=-1)[..., :n_samples]
-            print(indices_x.shape, x.shape)
             x = x.gather(-1, indices_x.expand(b, c_x, n_samples))
-            print(x.shape)
 
             indices_y = torch.argsort(torch.rand(b, 1, n_y, device=y.device), dim=-1)[..., :n_samples]
             y = y.gather(-1, indices_y.expand(b, c_y, n_samples))
@@ -295,7 +318,10 @@ class OptimalTransportLoss(torch.nn.Module):
             x = x.transpose(1, 2)  # (b, n_samples, c)
             y = y.transpose(1, 2)  # (b, n_samples, c)
 
-            layer_loss = OptimalTransportLoss.style_loss(x, y) + OptimalTransportLoss.moment_loss(x, y)
+            if i == 0 and c_x == c_y == 3:
+                layer_loss = self.color_matching_loss(x, y)
+            else:
+                layer_loss = OptimalTransportLoss.style_loss(x, y) + OptimalTransportLoss.moment_loss(x, y)
             loss += layer_loss * layer_weight
 
         loss = loss.view(batch_size, n_targets).mean(dim=0)
@@ -310,15 +336,15 @@ if __name__ == '__main__':
         "height": "../data/pbr_textures/Abstract_008/height.jpg",
         "normal": "../data/pbr_textures/Abstract_008/normal.jpg",
     }, target_channels={
-        "albedo": (0, 3),
-        "height": (3, 4),
-        "normal": (4, 7)
+        "albedo": 3,
+        "height": 1,
+        "normal": 3
     })
 
     with torch.no_grad():
         x = loss_fn.target_images.reshape(-1, 224, 224).unsqueeze(0).repeat(4, 1, 1, 1)
         x = x[:, [0, 1, 2, 3, 6, 7, 8]]
-        x[0, :3] = torch.rand_like(x[0, :3])
+        # x[0, :3] = torch.rand_like(x[0, :3])
         input_dict = {
             'rendered_images': x
         }

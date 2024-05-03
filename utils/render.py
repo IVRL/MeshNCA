@@ -109,6 +109,12 @@ class Renderer:
         return image_features
 
 
+
+    def __repr__(self):
+        return f"Renderer(height={self.height}, width={self.width}, knum={self.knum}, sigmainv={self.sigmainv}, " \
+               f"\n\tambient_light={self.ambient_light}, directional_light={self.directional_light}, " \
+               f"\n\tbackground_color={self.background_color})"
+
 if __name__ == '__main__':
     from utils.mesh import Mesh
     from utils.camera import PerspectiveCamera

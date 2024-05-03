@@ -32,6 +32,14 @@ def main(config):
     meshnca_config = get_device_config(config['meshnca'])
     model = MeshNCA(**meshnca_config).to(device)
 
+    state_dict = torch.load("Waffle_001.pth")
+
+    with torch.no_grad():
+        model.fc1.weight.data = state_dict['update_mlp.0.weight']
+        model.fc1.bias.data = state_dict['update_mlp.0.bias']
+        model.fc2.weight.data = state_dict['update_mlp.2.weight']
+        model.fc2.bias.data = state_dict['update_mlp.2.bias']
+
     with torch.no_grad():
         icosphere_config = get_device_config(config['train']['icosphere'])
         icosphere = Mesh.load_icosphere(**icosphere_config)
@@ -41,7 +49,7 @@ def main(config):
         loss_fn = Loss(**config['loss'])
 
         renderer = Renderer(**config['renderer'])
-        render_channels = loss_fn.loss_mapper['appearance'].get_target_channels()
+
         camera_config = get_device_config(config['train']['camera'])
 
         test_mesh_config = get_device_config(config['train']['test_mesh'])
@@ -51,6 +59,7 @@ def main(config):
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=config['train']['lr_decay_steps'],
                                                         gamma=config['train']['lr_decay_gamma'])
 
+    render_channels = model.get_render_channels()
     step_range = config['train']['step_range']
     inject_seed_interval = config['train']['inject_seed_interval']
     batch_size = config['train']['batch_size']
@@ -64,9 +73,11 @@ def main(config):
                 x[:1] = model.seed(1, icosphere.Nv)
 
         step_n = np.random.randint(step_range[0], step_range[1])
+        # with torch.no_grad():
         for _ in range(step_n):
             x = model(x, icosphere, None)
 
+        # render_channels = [0, 1, 2, 6, 7, 8, 9, 10, 11]
         x_render = x[..., render_channels] + 0.5
         camera = PerspectiveCamera.generate_random_view_cameras(**camera_config)
 
@@ -79,7 +90,7 @@ def main(config):
             'rendered_images': rendered_image,
             'nca_state': x,
         }
-        return_summary = (epoch + 1) % config['train']['summary_interval'] == 0
+        return_summary = (epoch + 0) % config['train']['summary_interval'] == 0
         loss, loss_log, summary = loss_fn(input_dict, return_summary=return_summary)
 
         with torch.no_grad():
