@@ -37,7 +37,13 @@ class AppearanceLoss(torch.nn.Module):
 
         self.device = device
 
-        self.vgg = torch_models.vgg16(weights=torch_models.VGG16_Weights.IMAGENET1K_FEATURES).features.to(device)
+        vgg = torch_models.vgg16(weights=torch_models.VGG16_Weights.IMAGENET1K_V1).features.to(device)
+        vgg_layers = []
+        for l in vgg:
+            if isinstance(l, torch.nn.MaxPool2d):
+                l = torch.nn.AvgPool2d(l.kernel_size, l.stride, l.padding, l.ceil_mode)
+            vgg_layers.append(l)
+        self.vgg = torch.nn.Sequential(*vgg_layers)
 
         self._load_target_images(low_pass_filter=True)
 
@@ -122,9 +128,9 @@ class AppearanceLoss(torch.nn.Module):
             x = input_dict['rendered_images'][:, c_start:c_end]
             c_start = c_end
 
-            # Resize if the image size is different from the target image size
-            if x.shape[2] != self.image_size[0] or x.shape[3] != self.image_size[1]:
-                x = TF.resize(x, self.image_size, antialias=True)
+            # # Resize if the image size is different from the target image size
+            # if x.shape[2] != self.image_size[0] or x.shape[3] != self.image_size[1]:
+            #     x = TF.resize(x, self.image_size, antialias=True)
 
             # Repeat the mono-color images to 3 channels
             if chn == 1:
@@ -134,11 +140,13 @@ class AppearanceLoss(torch.nn.Module):
 
         generated_images = torch.stack(xs, dim=1)  # [b, n_targets, 3, h, w]
 
+        b, n_targets, _, h, w = generated_images.shape
         summary = None
         if return_summary:
             with torch.no_grad():
-                images = generated_images.permute(0, 1, 3, 4, 2)
-                images = torch.cat([self.target_images.permute(0, 2, 3, 1).unsqueeze(0), images], dim=0)
+                images = generated_images.permute(0, 1, 3, 4, 2) # [b, n_targets, h, w, 3]
+                target_images = TF.resize(self.target_images, [h, w], antialias=True)
+                images = torch.cat([target_images.permute(0, 2, 3, 1).unsqueeze(0), images], dim=0)
                 images = torch.hstack([
                     torch.vstack([images[i, j] for j in range(images.shape[1])])
                     for i in range(images.shape[0])
@@ -148,8 +156,7 @@ class AppearanceLoss(torch.nn.Module):
                 summary = {
                     "images": Image.fromarray(images)
                 }
-        generated_images = generated_images.view(-1, generated_images.shape[2], generated_images.shape[3],
-                                                 generated_images.shape[4])
+        generated_images = generated_images.view(-1, 3, h, w)
         generated_features = self.get_vgg_features(generated_images)
 
         loss = self.style_loss_fn(self.target_features, generated_features)  # [n_targets]

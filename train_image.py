@@ -32,13 +32,13 @@ def main(config):
     meshnca_config = get_device_config(config['meshnca'])
     model = MeshNCA(**meshnca_config).to(device)
 
-    state_dict = torch.load("Waffle_001.pth")
-
-    with torch.no_grad():
-        model.fc1.weight.data = state_dict['update_mlp.0.weight']
-        model.fc1.bias.data = state_dict['update_mlp.0.bias']
-        model.fc2.weight.data = state_dict['update_mlp.2.weight']
-        model.fc2.bias.data = state_dict['update_mlp.2.bias']
+    # state_dict = torch.load("Waffle_001.pth")
+    #
+    # with torch.no_grad():
+    #     model.fc1.weight.data = state_dict['update_mlp.0.weight']
+    #     model.fc1.bias.data = state_dict['update_mlp.0.bias']
+    #     model.fc2.weight.data = state_dict['update_mlp.2.weight']
+    #     model.fc2.bias.data = state_dict['update_mlp.2.bias']
 
     with torch.no_grad():
         icosphere_config = get_device_config(config['train']['icosphere'])
@@ -106,6 +106,8 @@ def main(config):
         if return_summary:
             wandb.log({'rendered images': wandb.Image(summary['appearance-images'], caption='Rendered Images')},
                       step=epoch)
+
+    torch.save(model.state_dict(), f'{config["experiment_path"]}/model.pth')
 
 
 if __name__ == "__main__":
