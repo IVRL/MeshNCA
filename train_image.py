@@ -14,13 +14,14 @@ from utils.mesh import Mesh
 from utils.render import Renderer
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--config', type=str, default='configs/test.yaml', help="configuration")
+parser.add_argument('--config', type=str, default='configs/single_texture.yaml', help="configuration")
 
 
 def main(config):
     device = torch.device(config['device'])
+    wandb_enabled = 'wandb' in config
 
-    if 'wandb' in config and True:
+    if wandb_enabled:
         wandb.login(key=config['wandb']['key'], relogin=True)
         wandb.init(project=config['wandb']['project'], name=config['experiment_name'],
                    dir=config['experiment_path'], config=config)
@@ -32,13 +33,8 @@ def main(config):
     meshnca_config = get_device_config(config['meshnca'])
     model = MeshNCA(**meshnca_config).to(device)
 
-    # state_dict = torch.load("Waffle_001.pth")
-    #
-    # with torch.no_grad():
-    #     model.fc1.weight.data = state_dict['update_mlp.0.weight']
-    #     model.fc1.bias.data = state_dict['update_mlp.0.bias']
-    #     model.fc2.weight.data = state_dict['update_mlp.2.weight']
-    #     model.fc2.bias.data = state_dict['update_mlp.2.bias']
+    # torch.save(model.state_dict(), "graft_model.pth")
+    # exit()
 
     with torch.no_grad():
         icosphere_config = get_device_config(config['train']['icosphere'])
@@ -102,10 +98,11 @@ def main(config):
             lr_scheduler.step()
             pool[batch_idx] = x  # update pool
 
-        wandb.log(loss_log, step=epoch)
-        if return_summary:
-            wandb.log({'rendered images': wandb.Image(summary['appearance-images'], caption='Rendered Images')},
-                      step=epoch)
+        if wandb_enabled:
+            wandb.log(loss_log, step=epoch)
+            if return_summary:
+                wandb.log({'rendered images': wandb.Image(summary['appearance-images'], caption='Rendered Images')},
+                          step=epoch)
 
     torch.save(model.state_dict(), f'{config["experiment_path"]}/model.pth')
 

@@ -11,7 +11,8 @@ class MeshNCA(MessagePassing):
     def __init__(self, channels=16, fc_dim=128,
                  sh_order=1, aggregation='sum',
                  stochastic_update=True, seed_mode='zeros',
-                 condition=None, target_channels=(0, 3), device='cuda:0'):
+                 condition=None, target_channels=(0, 3),
+                 graft_initialization=None, device='cuda:0'):
         super(MeshNCA, self).__init__(aggr=aggregation)
         self.channels = channels
         self.fc_dim = fc_dim
@@ -47,6 +48,16 @@ class MeshNCA(MessagePassing):
 
         self.sh_func = rsh_functions[sh_order]
 
+        if graft_initialization is not None:
+            self.graft_initialization = graft_initialization
+            state_dict = torch.load(graft_initialization)
+            #
+            with torch.no_grad():
+                self.fc1.weight.data = state_dict['fc1.weight']
+                self.fc1.bias.data = state_dict['fc1.bias']
+                self.fc2.weight.data = state_dict['fc2.weight']
+                self.fc2.bias.data = state_dict['fc2.bias']
+
     def get_render_channels(self):
         render_channels = []
         for key in sorted(self.target_channels):
@@ -54,7 +65,6 @@ class MeshNCA(MessagePassing):
             render_channels += list(range(c_min, c_max))
 
         return render_channels
-
 
     def message(self, x_j: torch.Tensor, x_i: torch.Tensor) -> torch.Tensor:
         """
