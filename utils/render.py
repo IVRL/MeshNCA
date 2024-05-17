@@ -137,7 +137,7 @@ if __name__ == '__main__':
         renderer = Renderer(height=512, width=512, background_color=1.0)
 
         vertex_features = torch.zeros((2, mesh.vertices.shape[0], 3), device=device) + 0.5
-        vertex_features[1] *= 1.5
+        vertex_features[1] = torch.rand_like(vertex_features[1])
         image = renderer.render(mesh, camera, vertex_features).cpu().numpy()
         # image: [batch_size, num_views, height, width, num_features]
         print(image.shape)

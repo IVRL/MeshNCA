@@ -8,6 +8,20 @@ from utils.mesh import Mesh
 
 
 class MeshNCA(MessagePassing):
+    """
+    Mesh Neural Cellular Automata (MeshNCA) model
+    channels: Number of channels in the cell state
+    fc_dim: Number of neurons in the hidden layer of the adaptation MLP
+    sh_order: Degree of the Spherical harmonics. The number of coefficients is (sh_order + 1) ** 2
+    aggregation: Aggregation method for the message passing. Options: 'sum', 'mean'
+    stochastic_update: If True, each cell updates its state with a probability of 0.5
+    seed_mode: Determines the initial state of the cells. Options: 'zeros', 'random'
+    condition: If not None, the model is conditioned on a per-vertex condition vector
+    target_channels: The channels to be rendered. tuple or dictionary of tuples. Example: (0, 3) or {"rgb": (0, 3)}
+    graft_initialization: If not None, the MLP weights are initialized with the weights of a pre-trained model
+    device: PyTorch device
+    """
+
     def __init__(self, channels=16, fc_dim=128,
                  sh_order=1, aggregation='sum',
                  stochastic_update=True, seed_mode='zeros',
@@ -150,10 +164,6 @@ class MeshNCA(MessagePassing):
 
         return x + delta_x
 
-    def graft_initialization(self):
-        # @TODO: Implement the graft initialization method
-        pass
-
     def seed(self, pool_size: int, num_vertices: int):
         if self.seed_mode == 'zeros':
             return torch.zeros(pool_size, num_vertices, self.channels, device=self.device)
@@ -178,18 +188,9 @@ if __name__ == '__main__':
     device = torch.device("cuda:0")
 
     meshnca = MeshNCA(device=device).to(device)
-    state_dict = torch.load("../Waffle_001.pth")
-    print(state_dict.keys())
-
-    with torch.no_grad():
-        meshnca.fc1.weight.data = state_dict['update_mlp.0.weight']
-        meshnca.fc1.bias.data = state_dict['update_mlp.0.bias']
-        meshnca.fc2.weight.data = state_dict['update_mlp.2.weight']
-        meshnca.fc2.bias.data = state_dict['update_mlp.2.bias']
 
     with torch.no_grad():
         # Load a mesh from an .obj file
-        # mesh = Mesh('../data/meshes/mug/mug_remesh_lvl1.obj', device=device)
         mesh = Mesh.load_from_obj('../data/meshes/mug/mug.obj', subdivision_iter=1, device=device)
         # mesh = Mesh.load_icosphere(2 ** 6, device=device)
 
@@ -197,20 +198,20 @@ if __name__ == '__main__':
 
         # Define a perspective camera
         np.random.seed(42)
-        # camera = PerspectiveCamera.generate_random_view_cameras(1, distance=2.0, device=device)
-        camera = PerspectiveCamera()
-        renderer = Renderer(height=256, width=256, device=device)
+        camera = PerspectiveCamera.generate_random_view_cameras(3, distance=2.0, device=device)
+        # camera = PerspectiveCamera()
+        renderer = Renderer(height=256, width=256)
 
         # meshnca = MeshNCA(device=device).to(device)
         x = meshnca.seed(1, mesh.Nv)
 
         with VideoWriter('../tmp.mp4', fps=30.0) as video:
             for i in tqdm(range(360)):
-                for _ in range(4):
-                    x = meshnca(x, mesh, None)
-                color = x[:, :, 4:7] + 0.5
+                for _ in range(1):
+                    x = meshnca(x, mesh=mesh, h=None)
+                color = x[:, :, 0:3] + 0.5
                 color = torch.clamp(color, 0.0, 1.0)
-                image = renderer.render(mesh, camera, color).cpu().numpy()
+                image = renderer.render(mesh, camera, color).cpu().numpy()  # [batch_size, num_views, height, width, 3]
                 camera.rotateY(1.0)
-                image = np.hstack(image)
+                image = np.hstack(image[0])
                 video.add(image)

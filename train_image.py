@@ -73,7 +73,6 @@ def main(config):
         for _ in range(step_n):
             x = model(x, icosphere, None)
 
-        # render_channels = [0, 1, 2, 6, 7, 8, 9, 10, 11]
         x_render = x[..., render_channels] + 0.5
         camera = PerspectiveCamera.generate_random_view_cameras(**camera_config)
 
