@@ -14,9 +14,6 @@ meshnca:
   }
   graft_initialization: null     # Either null or a path to the pretrained model to use for graft initialization
 
-mesh:
-  train_icosphere:
-    subdivision_freq: 2 ** 6                  # Frequency of the icosphere subdivision.
 
 
 train:
@@ -66,7 +63,7 @@ loss:
       "rgb": "data/textures/bubbly_0101.jpg",
     }
     # Number of channels in the target images
-    target_channels: {
+    num_channels: {
       "rgb": 3,
     }
     vgg_layers: [ 1,3,6,8,11,13,15,22,29 ]    # VGG layers to be used for the style loss

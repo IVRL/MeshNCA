@@ -10,13 +10,13 @@ class AppearanceLoss(torch.nn.Module):
     def __init__(self,
                  image_size=(224, 224),
                  target_images_path="data/textures/bubbly_0101.jpg",
-                 target_channels=3,
+                 num_channels=3,
                  vgg_layers=(1, 3, 6, 8, 11, 13, 15, 22, 29),
                  device='cuda:0'):
         """
         :param image_size: Image resolution used for calculating the appearance  loss
         :param target_images_path: str or a dictionary of strings, path to the target images
-        :param target_channels: tuple or a dictionary of tuples, corresponding MeshNCA channels for the target images
+        :param num_channels: tuple or a dictionary of tuples, corresponding MeshNCA channels for the target images
         :param vgg_layers: VGG layers used for calculating the style loss
         :param device: PyTorch device
         """
@@ -28,10 +28,10 @@ class AppearanceLoss(torch.nn.Module):
         else:
             self.target_images_path = target_images_path
 
-        if not isinstance(target_channels, dict):
-            self.target_channels = {"RGB": target_channels}
+        if not isinstance(num_channels, dict):
+            self.num_channels = {"RGB": num_channels}
         else:
-            self.target_channels = target_channels
+            self.num_channels = num_channels
 
         self.vgg_layers = vgg_layers
 
@@ -93,7 +93,7 @@ class AppearanceLoss(torch.nn.Module):
             target_image = target_image.to(self.device)
             target_images.append(target_image)
 
-            chn = self.target_channels[key]
+            chn = self.num_channels[key]
             assert chn == 3 or chn == 1, \
                 "Either RGB or mono-color images are supported. " \
                 "The mono-color images will be repeated to 3 channels for calculating the loss."
@@ -122,8 +122,8 @@ class AppearanceLoss(torch.nn.Module):
 
         xs = []
         c_start = 0
-        for key in sorted(self.target_channels):
-            chn = self.target_channels[key]
+        for key in sorted(self.num_channels):
+            chn = self.num_channels[key]
             c_end = c_start + chn
             x = input_dict['rendered_images'][:, c_start:c_end]
             c_start = c_end
@@ -162,7 +162,7 @@ class AppearanceLoss(torch.nn.Module):
         loss = self.style_loss_fn(self.target_features, generated_features)  # [n_targets]
 
         loss_log = {
-            k: loss[i] for i, k in enumerate(sorted(self.target_channels))
+            k: loss[i] for i, k in enumerate(sorted(self.num_channels))
         }
 
         return loss.mean(), loss_log, summary
@@ -342,7 +342,7 @@ if __name__ == '__main__':
         "albedo": "../data/pbr_textures/Abstract_008/albedo.jpg",
         "height": "../data/pbr_textures/Abstract_008/height.jpg",
         "normal": "../data/pbr_textures/Abstract_008/normal.jpg",
-    }, target_channels={
+    }, num_channels={
         "albedo": 3,
         "height": 1,
         "normal": 3

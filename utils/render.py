@@ -1,4 +1,5 @@
 import numpy as np
+from PIL import Image
 import torch
 import kaolin
 from kaolin.render.mesh import prepare_vertices, dibr_rasterization, spherical_harmonic_lighting
@@ -8,8 +9,8 @@ from utils.camera import PerspectiveCamera
 
 
 class Renderer:
-    def __init__(self, height=256, width=256, knum=30, sigmainv=7000,
-                 ambient_light=0.28, directional_light=1.0, background_color=1.0):
+    def __init__(self, height=256, width=256, ambient_light=0.28, directional_light=1.0,
+                 background_color=1.0, knum=30, sigmainv=7000):
         """
         :param height: Height of the rendered image
         :param width: Width of the rendered image
@@ -108,12 +109,31 @@ class Renderer:
         image_features = image_features.view(batch_size, num_views, self.height, self.width, -1)
         return image_features
 
+    @staticmethod
+    @torch.no_grad()
+    def to_pil(rendered_image):
+        """
 
+        :param rendered_image: A tensor of shape [batch_size, num_views, height, width, num_features]
+        :return: A PIL Image showing the rendered images. Batch elements will be stacked vertically and views horizontally.
+        """
+        assert rendered_image.dim() == 5, "The input tensor should have 5 dimensions"
+        assert rendered_image.shape[-1] == 3, "The last dimension should have 3 features for RGB images"
+
+        batch_size, num_views, height, width, num_features = rendered_image.shape
+        rendered_image = rendered_image.cpu().numpy()
+        rendered_image = np.clip(rendered_image * 255.0, 0.0, 255.0).astype(np.uint8)
+
+        batch_images = [np.hstack(rendered_image[i]) for i in range(batch_size)]
+        image = Image.fromarray(np.vstack(batch_images))
+
+        return image
 
     def __repr__(self):
         return f"Renderer(height={self.height}, width={self.width}, knum={self.knum}, sigmainv={self.sigmainv}, " \
                f"\n\tambient_light={self.ambient_light}, directional_light={self.directional_light}, " \
                f"\n\tbackground_color={self.background_color})"
+
 
 if __name__ == '__main__':
     from utils.mesh import Mesh
@@ -122,15 +142,13 @@ if __name__ == '__main__':
     device = torch.device("cuda:0")
 
     mesh = Mesh.load_from_obj('../data/meshes/mug/mug.obj', device=device)
-    # mesh = Mesh('../data/meshes/flatland/flatland_remesh_lvl1.obj', device=device)
-    # mesh = Mesh('../data/meshes/sphere/sphere_remesh_lvl1.obj', device=device)
 
     with torch.no_grad():
         from utils.video import VideoWriter
         from tqdm import tqdm
         from PIL import Image
 
-        # torch.manual_seed(42)
+        torch.manual_seed(42)
         np.random.seed(42)
         # Render the mesh from 6 random viewpoints
         camera = PerspectiveCamera.generate_random_view_cameras(6, distance=2.0, device=device)
@@ -138,15 +156,10 @@ if __name__ == '__main__':
 
         vertex_features = torch.zeros((2, mesh.vertices.shape[0], 3), device=device) + 0.5
         vertex_features[1] = torch.rand_like(vertex_features[1])
-        image = renderer.render(mesh, camera, vertex_features).cpu().numpy()
-        # image: [batch_size, num_views, height, width, num_features]
-        print(image.shape)
+        rendered_image = renderer.render(mesh, camera, vertex_features).cpu().numpy()
+        # rendered_image: [batch_size, num_views, height, width, num_features]
 
-        image1 = np.hstack(image[0]) * 255.0
-        image2 = np.hstack(image[1]) * 255.0
-        image = np.vstack([image1, image2])
-        image = np.clip(image, 0, 255).astype(np.uint8)
-        Image.fromarray(image).show()
+        image = Renderer.to_pil(torch.tensor(rendered_image)).show()
 
         # with VideoWriter('tmp.mp4', fps=30.0) as video:
         #     for i in tqdm(range(120)):

@@ -18,9 +18,6 @@ meshnca:
   }
   graft_initialization: "graft_model.pth"     # Either null or a path to the pretrained model to use for graft initialization
 
-mesh:
-  train_icosphere:
-    subdivision_freq: 2 ** 6                  # Frequency of the icosphere subdivision.
 
 
 train:
@@ -74,7 +71,7 @@ loss:
       "ambient_occlusion": "data/pbr_textures/Abstract_008/ambient_occlusion.jpg",
     }
     # Number of channels in the target images
-    target_channels: {
+    num_channels: {
       "albedo": 3,
       "height": 1,
       "normal": 3,
