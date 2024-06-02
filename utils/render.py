@@ -123,6 +123,7 @@ class Renderer:
 
         :return: A PIL Image showing the rendered images.
         """
+        # @ TODO This function is not consistent with the meshnca.render_channels
         assert rendered_features.dim() == 5, "The input tensor should have 5 dimensions"
 
         if not isinstance(target_channels, dict):
@@ -143,7 +144,7 @@ class Renderer:
         )  # [batch_size*height, num_views*width, num_features]
 
         image_list = []
-        for key, channels in target_channels.items():
+        for key, channels in sorted(target_channels.items()):
             image = features[..., range(*channels)]
             if image.shape[-1] == 1:
                 image = np.repeat(image, 3, axis=-1)

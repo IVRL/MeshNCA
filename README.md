@@ -104,7 +104,7 @@ If you face out of memory issues, you can reduce the `num_views` or the `batch_s
 
 ```yaml
 train:
-  batch_size: 1                     # Batch size
+  batch_size: 1
   camera:
     num_views: 6  
 ```
