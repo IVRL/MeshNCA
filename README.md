@@ -109,6 +109,13 @@ train:
     num_views: 6  
 ```
 
+To record the training logs in wandb (Weights and Biases), you can set the `wandb` key in the config file.
+```yaml
+wandb:
+  project: "Project Name"
+  key: "Your API Key"
+```
+
 ## License
 
 Shield: [![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][cc-by-nc-sa]

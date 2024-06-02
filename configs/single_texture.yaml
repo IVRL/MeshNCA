@@ -1,4 +1,4 @@
-experiment_name: "image-bubbles"
+experiment_name: "image-guided-single"
 device: "cuda:0"
 
 meshnca:
@@ -15,7 +15,6 @@ meshnca:
   graft_initialization: null     # Either null or a path to the pretrained model to use for graft initialization
 
 
-
 train:
   epochs: 4000                      # Number of epochs
   batch_size: 1                     # Batch size
@@ -30,7 +29,7 @@ train:
 
   #### Rendering related configs ####
   camera:
-    num_views: 6                    # Number of random views used fo training
+    num_views: 3                    # Number of random views used fo training. In the paper, we used 6 views
     distance: 2.5                   # Distance of the camera from the origin
   icosphere:
     subdivision_freq: 64            # Frequency of the icosphere subdivision. 64 = 2 ** 6
@@ -68,14 +67,3 @@ loss:
     }
     vgg_layers: [ 1,3,6,8,11,13,15,22,29 ]    # VGG layers to be used for the style loss
 
-
-  #### Loss weights ####
-
-
-
-
-
-
-wandb:
-  project: "MeshNCA"
-  key: "529320c6abc9257a153c905f6e56d7b83c8d0dd0"

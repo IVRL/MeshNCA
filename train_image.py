@@ -14,7 +14,7 @@ from utils.mesh import Mesh
 from utils.render import Renderer
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--config', type=str, default='configs/pbr_texture.yaml', help="configuration")
+parser.add_argument('--config', type=str, default='configs/single_texture.yaml', help="configuration")
 
 
 def main(config):
@@ -33,8 +33,6 @@ def main(config):
     meshnca_config = get_device_config(config['meshnca'])
     model = MeshNCA(**meshnca_config).to(device)
 
-    # torch.save(model.state_dict(), "graft_model.pth")
-    # exit()
 
     with torch.no_grad():
         icosphere_config = get_device_config(config['train']['icosphere'])
