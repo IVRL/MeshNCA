@@ -111,23 +111,46 @@ class Renderer:
 
     @staticmethod
     @torch.no_grad()
-    def to_pil(rendered_image):
+    def to_pil(rendered_features, target_channels=(0, 3),
+               batch_stack='vertical', view_stack='horizontal', target_stack='vertical'):
         """
+        :param rendered_features: A tensor of shape [batch_size, num_views, height, width, num_features]
+        :param target_channels: The channels to be rendered. tuple or dictionary of tuples.
+                                Example: (0, 3) or {"rgb": (0, 3)}. Default renders the first 3 channels.
+        :param batch_stack: Whether to stack the batch elements vertically or horizontally.
+        :param view_stack: Whether to stack the views vertically or horizontally.
+        :param target_stack: Whether to stack the target channels vertically or horizontally.
 
-        :param rendered_image: A tensor of shape [batch_size, num_views, height, width, num_features]
-        :return: A PIL Image showing the rendered images. Batch elements will be stacked vertically and views horizontally.
+        :return: A PIL Image showing the rendered images.
         """
-        assert rendered_image.dim() == 5, "The input tensor should have 5 dimensions"
-        assert rendered_image.shape[-1] == 3, "The last dimension should have 3 features for RGB images"
+        assert rendered_features.dim() == 5, "The input tensor should have 5 dimensions"
 
-        batch_size, num_views, height, width, num_features = rendered_image.shape
-        rendered_image = rendered_image.cpu().numpy()
-        rendered_image = np.clip(rendered_image * 255.0, 0.0, 255.0).astype(np.uint8)
+        if not isinstance(target_channels, dict):
+            target_channels = {"rgb": target_channels}
+        else:
+            target_channels = target_channels
 
-        batch_images = [np.hstack(rendered_image[i]) for i in range(batch_size)]
-        image = Image.fromarray(np.vstack(batch_images))
+        batch_size, num_views, height, width, num_features = rendered_features.shape
+        rendered_features = rendered_features.cpu().numpy()
+        rendered_features = np.clip(rendered_features * 255.0, 0.0, 255.0).astype(np.uint8)
 
-        return image
+        stack_batch = np.vstack if batch_stack == 'vertical' else np.hstack
+        stack_view = np.vstack if view_stack == 'vertical' else np.hstack
+        stack_target = np.vstack if target_stack == 'vertical' else np.hstack
+
+        features = stack_batch(
+            [stack_view(rendered_features[i]) for i in range(batch_size)]
+        )  # [batch_size*height, num_views*width, num_features]
+
+        image_list = []
+        for key, channels in target_channels.items():
+            image = features[..., range(*channels)]
+            if image.shape[-1] == 1:
+                image = np.repeat(image, 3, axis=-1)
+
+            image_list.append(image)
+
+        return Image.fromarray(stack_target(image_list))
 
     def __repr__(self):
         return f"Renderer(height={self.height}, width={self.width}, knum={self.knum}, sigmainv={self.sigmainv}, " \
@@ -160,6 +183,7 @@ if __name__ == '__main__':
         # rendered_image: [batch_size, num_views, height, width, num_features]
 
         image = Renderer.to_pil(torch.tensor(rendered_image)).show()
+        image = Renderer.to_pil(torch.tensor(rendered_image), batch_stack='horizontal', view_stack='vertical').show()
 
         # with VideoWriter('tmp.mp4', fps=30.0) as video:
         #     for i in tqdm(range(120)):

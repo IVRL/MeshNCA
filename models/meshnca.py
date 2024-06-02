@@ -65,7 +65,7 @@ class MeshNCA(MessagePassing):
         if graft_initialization is not None:
             self.graft_initialization = graft_initialization
             state_dict = torch.load(graft_initialization)
-            #
+
             with torch.no_grad():
                 self.fc1.weight.data = state_dict['fc1.weight']
                 self.fc1.bias.data = state_dict['fc1.bias']
@@ -187,31 +187,40 @@ if __name__ == '__main__':
 
     device = torch.device("cuda:0")
 
-    meshnca = MeshNCA(device=device).to(device)
+    meshnca = MeshNCA(device=device,
+                      graft_initialization="../data/graft_pretrained/pbr_16_128.pth",
+                      target_channels={
+                          "albedo": [0, 3],
+                          "height": [6, 7],
+                          "normal": [7, 10],
+                          "roughness": [10, 11],
+                          "ambient_occlusion": [11, 12]
+                      }).to(device)
 
     with torch.no_grad():
         # Load a mesh from an .obj file
         mesh = Mesh.load_from_obj('../data/meshes/mug/mug.obj', subdivision_iter=1, device=device)
-        # mesh = Mesh.load_icosphere(2 ** 6, device=device)
 
-        print(mesh)
-
-        # Define a perspective camera
         np.random.seed(42)
         camera = PerspectiveCamera.generate_random_view_cameras(3, distance=2.0, device=device)
-        # camera = PerspectiveCamera()
         renderer = Renderer(height=256, width=256)
 
-        # meshnca = MeshNCA(device=device).to(device)
         x = meshnca.seed(1, mesh.Nv)
 
-        with VideoWriter('../tmp.mp4', fps=30.0) as video:
-            for i in tqdm(range(360)):
-                for _ in range(1):
-                    x = meshnca(x, mesh=mesh, h=None)
-                color = x[:, :, 0:3] + 0.5
-                color = torch.clamp(color, 0.0, 1.0)
-                image = renderer.render(mesh, camera, color).cpu().numpy()  # [batch_size, num_views, height, width, 3]
-                camera.rotateY(1.0)
-                image = np.hstack(image[0])
-                video.add(image)
+        for i in tqdm(range(256)):
+            x = meshnca(x, mesh=mesh, h=None)
+
+        x_render = x + 0.5
+        image = renderer.render(mesh, camera, x_render)  # [batch_size, num_views, height, width, 3]
+        image = Renderer.to_pil(image, meshnca.target_channels).show()
+
+        ## Uncomment the following code to generate a video
+        # with VideoWriter('../tmp.mp4', fps=30.0) as video:
+        #     for i in tqdm(range(360)):
+        #         for _ in range(4):
+        #             x = meshnca(x, mesh, None)
+        #         x_render = x + 0.5
+        #         image = renderer.render(mesh, camera, x_render)  # [batch_size, num_views, height, width, 3]
+        #         image = Renderer.to_pil(image, meshnca.target_channels)
+        #         camera.rotateY(1.0)
+        #         video.add(image)
