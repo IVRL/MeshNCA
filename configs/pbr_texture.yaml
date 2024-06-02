@@ -34,7 +34,7 @@ train:
 
   #### Rendering related configs ####
   camera:
-    num_views: 3                    # Number of random views used fo training
+    num_views: 6                    # Number of random views used fo training
     distance: 2.5                   # Distance of the camera from the origin
   icosphere:
     subdivision_freq: 64            # Frequency of the icosphere subdivision. 64 = 2 ** 6

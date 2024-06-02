@@ -14,7 +14,7 @@ from utils.mesh import Mesh
 from utils.render import Renderer
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--config', type=str, default='configs/single_texture.yaml', help="configuration")
+parser.add_argument('--config', type=str, default='configs/pbr_texture.yaml', help="configuration")
 
 
 def main(config):
