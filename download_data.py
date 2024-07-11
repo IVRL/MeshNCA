@@ -41,7 +41,7 @@ def main():
 
     if not os.path.exists("data/textures"):
         texture_dataset_url = (
-            "https://drive.google.com/uc?id=1Wv7vvPGMf3V4tuv2OL12jewBNTsRUP8S"
+            "https://drive.google.com/uc?id=1HKeRYWAleA4cxQNen90FzBmcDLCxGmZr"
         )
         gdown.download(texture_dataset_url, "data/textures.zip", quiet=False)
         print("Unzipping the Texture dataset")
