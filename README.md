@@ -116,6 +116,23 @@ wandb:
   key: "Your API Key"
 ```
 
+## Citation
+
+If you make use of our work, please cite our paper:
+
+```
+@article{pajouheshgar2024mesh,
+  title={Mesh neural cellular automata},
+  author={Pajouheshgar, Ehsan and Xu, Yitao and Mordvintsev, Alexander and Niklasson, Eyvind and Zhang, Tong and S{\"u}sstrunk, Sabine},
+  journal={ACM Transactions on Graphics (TOG)},
+  volume={43},
+  number={4},
+  pages={1--16},
+  year={2024},
+  publisher={ACM New York, NY, USA}
+}
+```
+
 ## License
 
 Shield: [![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][cc-by-nc-sa]
